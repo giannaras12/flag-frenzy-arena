@@ -3,6 +3,7 @@ import { Dashboard } from '@/components/dashboard/Dashboard';
 import { Garage } from '@/components/garage/Garage';
 import { Game } from '@/components/game/Game';
 import { useGameConnection } from '@/hooks/useGameConnection';
+import { useUISounds } from '@/hooks/useUISounds';
 import { HULLS, GUNS } from '@/lib/gameData';
 import { PlayerData, GameState, Flag, Wall, Player } from '@/lib/gameTypes';
 import { MAP_WALLS } from '@/lib/gameData';
@@ -95,6 +96,8 @@ const Index = () => {
   const [localPlayerData, setLocalPlayerData] = useState<PlayerData | null>(null);
   const [localGameState, setLocalGameState] = useState<GameState | null>(null);
   
+  const { playClick, playSuccess, playPurchase, playUpgrade, playEquip, playError } = useUISounds();
+  
   const {
     isConnected,
     isConnecting,
@@ -112,15 +115,18 @@ const Index = () => {
   const currentPlayerId = isConnected ? playerId : 'local-player';
 
   const handleConnect = useCallback((username: string) => {
+    playClick();
     // Try to connect to server
     connect(username);
     
     // Also create local mock data for offline play
     const mockData = createMockPlayerData(username);
     setLocalPlayerData(mockData);
-  }, [connect]);
+    playSuccess();
+  }, [connect, playClick, playSuccess]);
 
   const handleEnterBattle = useCallback(() => {
+    playClick();
     if (isConnected) {
       // Request to join battle from server
     } else {
@@ -128,14 +134,15 @@ const Index = () => {
       setLocalGameState(createMockGameState('local-player'));
     }
     setCurrentScreen('game');
-  }, [isConnected]);
+  }, [isConnected, playClick]);
 
   const handleOpenGarage = useCallback(() => {
+    playClick();
     if (isConnected) {
       sendMessage({ type: 'getGarage' });
     }
     setCurrentScreen('garage');
-  }, [isConnected, sendMessage]);
+  }, [isConnected, sendMessage, playClick]);
 
   const handleExitBattle = useCallback(() => {
     setLocalGameState(null);
@@ -145,6 +152,7 @@ const Index = () => {
   const handleBuyHull = useCallback((hullId: string) => {
     if (isConnected) {
       sendMessage({ type: 'buyHull', hullId });
+      playPurchase();
     } else if (localPlayerData) {
       const hull = HULLS.find(h => h.id === hullId);
       if (hull && localPlayerData.money >= hull.price) {
@@ -154,13 +162,17 @@ const Index = () => {
           ownedHulls: [...localPlayerData.ownedHulls, hullId],
           hullUpgrades: { ...localPlayerData.hullUpgrades, [hullId]: 0 },
         });
+        playPurchase();
+      } else {
+        playError();
       }
     }
-  }, [isConnected, sendMessage, localPlayerData]);
+  }, [isConnected, sendMessage, localPlayerData, playPurchase, playError]);
 
   const handleBuyGun = useCallback((gunId: string) => {
     if (isConnected) {
       sendMessage({ type: 'buyGun', gunId });
+      playPurchase();
     } else if (localPlayerData) {
       const gun = GUNS.find(g => g.id === gunId);
       if (gun && localPlayerData.money >= gun.price) {
@@ -170,13 +182,17 @@ const Index = () => {
           ownedGuns: [...localPlayerData.ownedGuns, gunId],
           gunUpgrades: { ...localPlayerData.gunUpgrades, [gunId]: 0 },
         });
+        playPurchase();
+      } else {
+        playError();
       }
     }
-  }, [isConnected, sendMessage, localPlayerData]);
+  }, [isConnected, sendMessage, localPlayerData, playPurchase, playError]);
 
   const handleUpgradeHull = useCallback((hullId: string) => {
     if (isConnected) {
       sendMessage({ type: 'upgradeHull', hullId });
+      playUpgrade();
     } else if (localPlayerData) {
       const currentLevel = localPlayerData.hullUpgrades[hullId] || 0;
       const cost = Math.floor(1000 * Math.pow(1.5, currentLevel));
@@ -186,13 +202,17 @@ const Index = () => {
           money: localPlayerData.money - cost,
           hullUpgrades: { ...localPlayerData.hullUpgrades, [hullId]: currentLevel + 1 },
         });
+        playUpgrade();
+      } else {
+        playError();
       }
     }
-  }, [isConnected, sendMessage, localPlayerData]);
+  }, [isConnected, sendMessage, localPlayerData, playUpgrade, playError]);
 
   const handleUpgradeGun = useCallback((gunId: string) => {
     if (isConnected) {
       sendMessage({ type: 'upgradeGun', gunId });
+      playUpgrade();
     } else if (localPlayerData) {
       const currentLevel = localPlayerData.gunUpgrades[gunId] || 0;
       const cost = Math.floor(1000 * Math.pow(1.5, currentLevel));
@@ -202,25 +222,30 @@ const Index = () => {
           money: localPlayerData.money - cost,
           gunUpgrades: { ...localPlayerData.gunUpgrades, [gunId]: currentLevel + 1 },
         });
+        playUpgrade();
+      } else {
+        playError();
       }
     }
-  }, [isConnected, sendMessage, localPlayerData]);
+  }, [isConnected, sendMessage, localPlayerData, playUpgrade, playError]);
 
   const handleEquipHull = useCallback((hullId: string) => {
+    playEquip();
     if (isConnected) {
       sendMessage({ type: 'equipHull', hullId });
     } else if (localPlayerData) {
       setLocalPlayerData({ ...localPlayerData, equippedHull: hullId });
     }
-  }, [isConnected, sendMessage, localPlayerData]);
+  }, [isConnected, sendMessage, localPlayerData, playEquip]);
 
   const handleEquipGun = useCallback((gunId: string) => {
+    playEquip();
     if (isConnected) {
       sendMessage({ type: 'equipGun', gunId });
     } else if (localPlayerData) {
       setLocalPlayerData({ ...localPlayerData, equippedGun: gunId });
     }
-  }, [isConnected, sendMessage, localPlayerData]);
+  }, [isConnected, sendMessage, localPlayerData, playEquip]);
 
   // Game controls
   const handleMove = useCallback((direction: { x: number; y: number }) => {

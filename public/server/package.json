@@ -1,0 +1,17 @@
+{
+  "name": "flag-wars-server",
+  "version": "1.0.0",
+  "description": "Flag Wars Game Server - Authoritative multiplayer tank CTF game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "uuid": "^9.0.1"
+  },
+  "keywords": ["game", "server", "websocket", "tanks", "ctf"],
+  "author": "Flag Wars Team",
+  "license": "MIT"
+}

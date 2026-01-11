@@ -1,36 +1,32 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Dashboard } from '@/components/dashboard/Dashboard';
 import { Garage } from '@/components/garage/Garage';
 import { Game } from '@/components/game/Game';
 import { useGameConnection } from '@/hooks/useGameConnection';
 import { useUISounds } from '@/hooks/useUISounds';
-import { HULLS, GUNS } from '@/lib/gameData';
-import { PlayerData, GameState, Flag, Wall, Player } from '@/lib/gameTypes';
-import { MAP_WALLS } from '@/lib/gameData';
+import { HULLS, GUNS, MAP_WALLS } from '@/lib/gameData';
+import { PlayerData, GameState } from '@/lib/gameTypes';
 
 type Screen = 'dashboard' | 'garage' | 'game';
 
-// Mock player data for demo (when not connected to server)
+// Mock player data for offline demo
 const createMockPlayerData = (username: string): PlayerData => ({
   id: 'local-player',
   username,
   money: 10000,
+  xp: 500,
+  rank: { id: 3, name: 'Gefreiter', minXP: 500, color: '#4ade80', icon: '🟢' },
+  nextRank: { rank: { id: 4, name: 'Corporal', minXP: 1500, color: '#22c55e', icon: '🟩' }, xpNeeded: 1000, progress: 0 },
   ownedHulls: ['wasp'],
   ownedGuns: ['smoky'],
   equippedHull: 'wasp',
   equippedGun: 'smoky',
   hullUpgrades: { wasp: 0 },
   gunUpgrades: { smoky: 0 },
-  stats: {
-    kills: 15,
-    deaths: 8,
-    flagCaptures: 3,
-    flagReturns: 2,
-    damageDealt: 5000,
-  },
+  stats: { kills: 15, deaths: 8, flagCaptures: 3, flagReturns: 2, damageDealt: 5000 },
 });
 
-// Mock game state for demo
+// Mock game state for offline demo
 const createMockGameState = (playerId: string): GameState => {
   const hull = HULLS[0];
   const gun = GUNS[0];
@@ -50,37 +46,12 @@ const createMockGameState = (playerId: string): GameState => {
         gun,
         hasFlag: false,
         isAlive: true,
-      },
-      {
-        id: 'enemy-1',
-        username: 'Enemy1',
-        position: { x: 1050, y: 300 },
-        rotation: Math.PI,
-        turretRotation: Math.PI,
-        health: hull.baseHealth,
-        maxHealth: hull.baseHealth,
-        team: 'blue',
-        hull,
-        gun,
-        hasFlag: false,
-        isAlive: true,
+        rank: { id: 3, name: 'Gefreiter', minXP: 500, color: '#4ade80', icon: '🟢' },
       },
     ],
     flags: [
-      {
-        id: 'red-flag',
-        team: 'red',
-        position: { x: 80, y: 400 },
-        isAtBase: true,
-        carriedBy: null,
-      },
-      {
-        id: 'blue-flag',
-        team: 'blue',
-        position: { x: 1120, y: 400 },
-        isAtBase: true,
-        carriedBy: null,
-      },
+      { id: 'red-flag', team: 'red', position: { x: 80, y: 400 }, isAtBase: true, carriedBy: null },
+      { id: 'blue-flag', team: 'blue', position: { x: 1120, y: 400 }, isAtBase: true, carriedBy: null },
     ],
     projectiles: [],
     walls: MAP_WALLS,
@@ -101,57 +72,77 @@ const Index = () => {
   const {
     isConnected,
     isConnecting,
+    isAuthenticated,
     error,
     gameState: serverGameState,
     playerData: serverPlayerData,
     playerId,
+    sessionToken,
+    lastRankUp,
+    lastXPGain,
     connect,
+    register,
+    login,
+    joinBattle,
+    leaveBattle,
     sendMessage,
+    clearRankUp,
+    clearXPGain,
   } = useGameConnection();
 
   // Use server data if connected, otherwise use local mock data
-  const playerData = isConnected ? serverPlayerData : localPlayerData;
-  const gameState = isConnected ? serverGameState : localGameState;
-  const currentPlayerId = isConnected ? playerId : 'local-player';
+  const playerData = isAuthenticated ? serverPlayerData : localPlayerData;
+  const gameState = isAuthenticated ? serverGameState : localGameState;
+  const currentPlayerId = isAuthenticated ? playerId : 'local-player';
 
-  const handleConnect = useCallback((username: string) => {
+  const handleConnect = useCallback(() => {
     playClick();
-    // Try to connect to server
-    connect(username);
-    
-    // Also create local mock data for offline play
-    const mockData = createMockPlayerData(username);
-    setLocalPlayerData(mockData);
-    playSuccess();
-  }, [connect, playClick, playSuccess]);
+    connect();
+  }, [connect, playClick]);
+
+  const handleLogin = useCallback((username: string, password: string) => {
+    playClick();
+    login(username, password);
+  }, [login, playClick]);
+
+  const handleRegister = useCallback((username: string, password: string) => {
+    playClick();
+    register(username, password);
+  }, [register, playClick]);
 
   const handleEnterBattle = useCallback(() => {
     playClick();
-    if (isConnected) {
-      // Request to join battle from server
+    if (isAuthenticated && sessionToken) {
+      joinBattle();
     } else {
       // Create mock game state for offline play
       setLocalGameState(createMockGameState('local-player'));
+      if (!localPlayerData) {
+        setLocalPlayerData(createMockPlayerData('Guest'));
+      }
     }
     setCurrentScreen('game');
-  }, [isConnected, playClick]);
+  }, [isAuthenticated, sessionToken, joinBattle, playClick, localPlayerData]);
 
   const handleOpenGarage = useCallback(() => {
     playClick();
-    if (isConnected) {
-      sendMessage({ type: 'getGarage' });
+    if (isAuthenticated && sessionToken) {
+      sendMessage({ type: 'getGarage', sessionToken });
     }
     setCurrentScreen('garage');
-  }, [isConnected, sendMessage, playClick]);
+  }, [isAuthenticated, sessionToken, sendMessage, playClick]);
 
   const handleExitBattle = useCallback(() => {
+    if (isAuthenticated) {
+      leaveBattle();
+    }
     setLocalGameState(null);
     setCurrentScreen('dashboard');
-  }, []);
+  }, [isAuthenticated, leaveBattle]);
 
   const handleBuyHull = useCallback((hullId: string) => {
-    if (isConnected) {
-      sendMessage({ type: 'buyHull', hullId });
+    if (isAuthenticated && sessionToken) {
+      sendMessage({ type: 'buyHull', sessionToken, hullId });
       playPurchase();
     } else if (localPlayerData) {
       const hull = HULLS.find(h => h.id === hullId);
@@ -167,11 +158,11 @@ const Index = () => {
         playError();
       }
     }
-  }, [isConnected, sendMessage, localPlayerData, playPurchase, playError]);
+  }, [isAuthenticated, sessionToken, sendMessage, localPlayerData, playPurchase, playError]);
 
   const handleBuyGun = useCallback((gunId: string) => {
-    if (isConnected) {
-      sendMessage({ type: 'buyGun', gunId });
+    if (isAuthenticated && sessionToken) {
+      sendMessage({ type: 'buyGun', sessionToken, gunId });
       playPurchase();
     } else if (localPlayerData) {
       const gun = GUNS.find(g => g.id === gunId);
@@ -187,11 +178,11 @@ const Index = () => {
         playError();
       }
     }
-  }, [isConnected, sendMessage, localPlayerData, playPurchase, playError]);
+  }, [isAuthenticated, sessionToken, sendMessage, localPlayerData, playPurchase, playError]);
 
   const handleUpgradeHull = useCallback((hullId: string) => {
-    if (isConnected) {
-      sendMessage({ type: 'upgradeHull', hullId });
+    if (isAuthenticated && sessionToken) {
+      sendMessage({ type: 'upgradeHull', sessionToken, hullId });
       playUpgrade();
     } else if (localPlayerData) {
       const currentLevel = localPlayerData.hullUpgrades[hullId] || 0;
@@ -207,11 +198,11 @@ const Index = () => {
         playError();
       }
     }
-  }, [isConnected, sendMessage, localPlayerData, playUpgrade, playError]);
+  }, [isAuthenticated, sessionToken, sendMessage, localPlayerData, playUpgrade, playError]);
 
   const handleUpgradeGun = useCallback((gunId: string) => {
-    if (isConnected) {
-      sendMessage({ type: 'upgradeGun', gunId });
+    if (isAuthenticated && sessionToken) {
+      sendMessage({ type: 'upgradeGun', sessionToken, gunId });
       playUpgrade();
     } else if (localPlayerData) {
       const currentLevel = localPlayerData.gunUpgrades[gunId] || 0;
@@ -227,32 +218,31 @@ const Index = () => {
         playError();
       }
     }
-  }, [isConnected, sendMessage, localPlayerData, playUpgrade, playError]);
+  }, [isAuthenticated, sessionToken, sendMessage, localPlayerData, playUpgrade, playError]);
 
   const handleEquipHull = useCallback((hullId: string) => {
     playEquip();
-    if (isConnected) {
-      sendMessage({ type: 'equipHull', hullId });
+    if (isAuthenticated && sessionToken) {
+      sendMessage({ type: 'equipHull', sessionToken, hullId });
     } else if (localPlayerData) {
       setLocalPlayerData({ ...localPlayerData, equippedHull: hullId });
     }
-  }, [isConnected, sendMessage, localPlayerData, playEquip]);
+  }, [isAuthenticated, sessionToken, sendMessage, localPlayerData, playEquip]);
 
   const handleEquipGun = useCallback((gunId: string) => {
     playEquip();
-    if (isConnected) {
-      sendMessage({ type: 'equipGun', gunId });
+    if (isAuthenticated && sessionToken) {
+      sendMessage({ type: 'equipGun', sessionToken, gunId });
     } else if (localPlayerData) {
       setLocalPlayerData({ ...localPlayerData, equippedGun: gunId });
     }
-  }, [isConnected, sendMessage, localPlayerData, playEquip]);
+  }, [isAuthenticated, sessionToken, sendMessage, localPlayerData, playEquip]);
 
   // Game controls
   const handleMove = useCallback((direction: { x: number; y: number }) => {
-    if (isConnected) {
+    if (isAuthenticated) {
       sendMessage({ type: 'move', direction });
     } else if (localGameState) {
-      // Local movement for demo
       setLocalGameState(prev => {
         if (!prev) return null;
         const player = prev.players.find(p => p.id === 'local-player');
@@ -272,10 +262,10 @@ const Index = () => {
         };
       });
     }
-  }, [isConnected, sendMessage, localGameState]);
+  }, [isAuthenticated, sendMessage, localGameState]);
 
   const handleRotate = useCallback((angle: number) => {
-    if (isConnected) {
+    if (isAuthenticated) {
       sendMessage({ type: 'rotate', angle });
     } else {
       setLocalGameState(prev => {
@@ -288,10 +278,10 @@ const Index = () => {
         };
       });
     }
-  }, [isConnected, sendMessage]);
+  }, [isAuthenticated, sendMessage]);
 
   const handleRotateTurret = useCallback((angle: number) => {
-    if (isConnected) {
+    if (isAuthenticated) {
       sendMessage({ type: 'rotateTurret', angle });
     } else {
       setLocalGameState(prev => {
@@ -304,21 +294,19 @@ const Index = () => {
         };
       });
     }
-  }, [isConnected, sendMessage]);
+  }, [isAuthenticated, sendMessage]);
 
   const handleShoot = useCallback(() => {
-    if (isConnected) {
+    if (isAuthenticated) {
       sendMessage({ type: 'shoot' });
     }
-    // Local shooting would be handled here
-  }, [isConnected, sendMessage]);
+  }, [isAuthenticated, sendMessage]);
 
   const handleInteract = useCallback(() => {
-    if (isConnected) {
+    if (isAuthenticated) {
       sendMessage({ type: 'interact' });
     }
-    // Local flag interaction would be handled here
-  }, [isConnected, sendMessage]);
+  }, [isAuthenticated, sendMessage]);
 
   return (
     <>
@@ -328,8 +316,11 @@ const Index = () => {
           onEnterBattle={handleEnterBattle}
           onOpenGarage={handleOpenGarage}
           onConnect={handleConnect}
-          isConnected={isConnected || !!localPlayerData}
+          onLogin={handleLogin}
+          onRegister={handleRegister}
+          isConnected={isConnected}
           isConnecting={isConnecting}
+          isAuthenticated={isAuthenticated || !!localPlayerData}
           error={error}
         />
       )}
@@ -351,12 +342,17 @@ const Index = () => {
         <Game
           gameState={gameState}
           playerId={currentPlayerId}
+          playerData={playerData}
           onMove={handleMove}
           onRotate={handleRotate}
           onRotateTurret={handleRotateTurret}
           onShoot={handleShoot}
           onInteract={handleInteract}
           onExitBattle={handleExitBattle}
+          lastRankUp={lastRankUp}
+          lastXPGain={lastXPGain}
+          onClearRankUp={clearRankUp}
+          onClearXPGain={clearXPGain}
         />
       )}
     </>

@@ -5,6 +5,20 @@ export interface Vector2 {
   y: number;
 }
 
+export interface Rank {
+  id: number;
+  name: string;
+  minXP: number;
+  color: string;
+  icon: string;
+}
+
+export interface NextRankInfo {
+  rank: Rank;
+  xpNeeded: number;
+  progress: number;
+}
+
 export interface Hull {
   id: string;
   name: string;
@@ -13,7 +27,7 @@ export interface Hull {
   baseSpeed: number;
   baseArmor: number;
   price: number;
-  upgradeLevel: number; // M0-M20
+  upgradeLevel: number;
   sprite: string;
   color: string;
 }
@@ -23,11 +37,11 @@ export interface Gun {
   name: string;
   description: string;
   baseDamage: number;
-  fireRate: number; // shots per second
-  reloadTime: number; // ms
+  fireRate: number;
+  reloadTime: number;
   projectileSpeed: number;
   price: number;
-  upgradeLevel: number; // M0-M20
+  upgradeLevel: number;
   shotEffect: 'normal' | 'explosive' | 'laser' | 'plasma' | 'railgun';
   shotColor: string;
   sprite: string;
@@ -46,6 +60,8 @@ export interface Player {
   gun: Gun;
   hasFlag: boolean;
   isAlive: boolean;
+  xp?: number;
+  rank?: Rank;
 }
 
 export interface Flag {
@@ -81,18 +97,24 @@ export interface GameStats {
   flagCaptures: number;
   flagReturns: number;
   damageDealt: number;
+  wins?: number;
+  losses?: number;
+  gamesPlayed?: number;
 }
 
 export interface PlayerData {
   id: string;
   username: string;
   money: number;
+  xp: number;
+  rank?: Rank;
+  nextRank?: NextRankInfo | null;
   ownedHulls: string[];
   ownedGuns: string[];
   equippedHull: string;
   equippedGun: string;
-  hullUpgrades: Record<string, number>; // hullId -> upgrade level
-  gunUpgrades: Record<string, number>; // gunId -> upgrade level
+  hullUpgrades: Record<string, number>;
+  gunUpgrades: Record<string, number>;
   stats: GameStats;
 }
 
@@ -112,24 +134,33 @@ export interface ServerConfig {
   port: number;
 }
 
+export interface AuthCredentials {
+  username: string;
+  password: string;
+}
+
 // Message types for client-server communication
 export type ClientMessage =
-  | { type: 'join'; username: string }
+  | { type: 'register'; username: string; password: string }
+  | { type: 'login'; username: string; password: string }
+  | { type: 'joinBattle'; sessionToken: string }
+  | { type: 'leaveBattle' }
   | { type: 'move'; direction: Vector2 }
   | { type: 'rotate'; angle: number }
   | { type: 'rotateTurret'; angle: number }
   | { type: 'shoot' }
-  | { type: 'interact' } // E key for flag
-  | { type: 'getGarage' }
-  | { type: 'buyHull'; hullId: string }
-  | { type: 'buyGun'; gunId: string }
-  | { type: 'upgradeHull'; hullId: string }
-  | { type: 'upgradeGun'; gunId: string }
-  | { type: 'equipHull'; hullId: string }
-  | { type: 'equipGun'; gunId: string };
+  | { type: 'interact' }
+  | { type: 'getGarage'; sessionToken: string }
+  | { type: 'buyHull'; sessionToken: string; hullId: string }
+  | { type: 'buyGun'; sessionToken: string; gunId: string }
+  | { type: 'upgradeHull'; sessionToken: string; hullId: string }
+  | { type: 'upgradeGun'; sessionToken: string; gunId: string }
+  | { type: 'equipHull'; sessionToken: string; hullId: string }
+  | { type: 'equipGun'; sessionToken: string; gunId: string };
 
 export type ServerMessage =
-  | { type: 'welcome'; playerId: string; playerData: PlayerData }
+  | { type: 'authSuccess'; sessionToken: string; playerData: PlayerData }
+  | { type: 'battleJoined'; playerId: string; team: 'red' | 'blue'; playerData: PlayerData }
   | { type: 'gameState'; state: GameState }
   | { type: 'playerJoined'; player: Player }
   | { type: 'playerLeft'; playerId: string }
@@ -140,4 +171,6 @@ export type ServerMessage =
   | { type: 'garageData'; hulls: Hull[]; guns: Gun[]; playerData: PlayerData }
   | { type: 'purchaseResult'; success: boolean; message: string; playerData?: PlayerData }
   | { type: 'upgradeResult'; success: boolean; message: string; playerData?: PlayerData }
+  | { type: 'rankUp'; oldRank: Rank; newRank: Rank; newXP: number }
+  | { type: 'xpGain'; amount: number; newXP: number; currentRank: Rank; nextRank: NextRankInfo | null }
   | { type: 'error'; message: string };

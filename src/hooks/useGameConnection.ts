@@ -6,37 +6,52 @@ import {
   GameState, 
   PlayerData,
   Hull,
-  Gun 
+  Gun,
+  Rank,
+  NextRankInfo,
 } from '@/lib/gameTypes';
 
 interface UseGameConnectionReturn {
   isConnected: boolean;
   isConnecting: boolean;
+  isAuthenticated: boolean;
   error: string | null;
   gameState: GameState | null;
   playerData: PlayerData | null;
   garageHulls: Hull[];
   garageGuns: Gun[];
   playerId: string | null;
-  connect: (username: string) => void;
+  sessionToken: string | null;
+  lastRankUp: { oldRank: Rank; newRank: Rank } | null;
+  lastXPGain: { amount: number; newXP: number } | null;
+  connect: () => void;
   disconnect: () => void;
+  register: (username: string, password: string) => void;
+  login: (username: string, password: string) => void;
+  joinBattle: () => void;
+  leaveBattle: () => void;
   sendMessage: (message: ClientMessage) => void;
+  clearRankUp: () => void;
+  clearXPGain: () => void;
   lastEvent: ServerMessage | null;
 }
 
 export const useGameConnection = (): UseGameConnectionReturn => {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerData, setPlayerData] = useState<PlayerData | null>(null);
   const [garageHulls, setGarageHulls] = useState<Hull[]>([]);
   const [garageGuns, setGarageGuns] = useState<Gun[]>([]);
   const [playerId, setPlayerId] = useState<string | null>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [lastEvent, setLastEvent] = useState<ServerMessage | null>(null);
+  const [lastRankUp, setLastRankUp] = useState<{ oldRank: Rank; newRank: Rank } | null>(null);
+  const [lastXPGain, setLastXPGain] = useState<{ amount: number; newXP: number } | null>(null);
   
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
@@ -44,7 +59,17 @@ export const useGameConnection = (): UseGameConnectionReturn => {
       setLastEvent(message);
       
       switch (message.type) {
-        case 'welcome':
+        case 'authSuccess':
+          setSessionToken(message.sessionToken);
+          setPlayerData(message.playerData);
+          setPlayerId(message.playerData.id);
+          setIsAuthenticated(true);
+          setError(null);
+          // Store session in localStorage for persistence
+          localStorage.setItem('flagwars_session', message.sessionToken);
+          break;
+
+        case 'battleJoined':
           setPlayerId(message.playerId);
           setPlayerData(message.playerData);
           break;
@@ -65,6 +90,22 @@ export const useGameConnection = (): UseGameConnectionReturn => {
             setPlayerData(message.playerData);
           }
           break;
+
+        case 'rankUp':
+          setLastRankUp({ oldRank: message.oldRank, newRank: message.newRank });
+          // Update player data with new rank
+          setPlayerData(prev => prev ? { ...prev, xp: message.newXP, rank: message.newRank } : null);
+          break;
+
+        case 'xpGain':
+          setLastXPGain({ amount: message.amount, newXP: message.newXP });
+          setPlayerData(prev => prev ? { 
+            ...prev, 
+            xp: message.newXP, 
+            rank: message.currentRank,
+            nextRank: message.nextRank,
+          } : null);
+          break;
           
         case 'error':
           setError(message.message);
@@ -75,7 +116,7 @@ export const useGameConnection = (): UseGameConnectionReturn => {
     }
   }, []);
 
-  const connect = useCallback((username: string) => {
+  const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
@@ -91,9 +132,6 @@ export const useGameConnection = (): UseGameConnectionReturn => {
         setIsConnected(true);
         setIsConnecting(false);
         setError(null);
-        
-        // Send join message
-        ws.send(JSON.stringify({ type: 'join', username }));
       };
 
       ws.onmessage = handleMessage;
@@ -101,6 +139,7 @@ export const useGameConnection = (): UseGameConnectionReturn => {
       ws.onclose = () => {
         setIsConnected(false);
         setIsConnecting(false);
+        setIsAuthenticated(false);
         wsRef.current = null;
       };
 
@@ -115,24 +154,58 @@ export const useGameConnection = (): UseGameConnectionReturn => {
   }, [handleMessage]);
 
   const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-    
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
     
     setIsConnected(false);
+    setIsAuthenticated(false);
     setPlayerId(null);
+    setSessionToken(null);
     setGameState(null);
+    localStorage.removeItem('flagwars_session');
+  }, []);
+
+  const register = useCallback((username: string, password: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setError(null);
+      wsRef.current.send(JSON.stringify({ type: 'register', username, password }));
+    }
+  }, []);
+
+  const login = useCallback((username: string, password: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setError(null);
+      wsRef.current.send(JSON.stringify({ type: 'login', username, password }));
+    }
+  }, []);
+
+  const joinBattle = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && sessionToken) {
+      wsRef.current.send(JSON.stringify({ type: 'joinBattle', sessionToken }));
+    }
+  }, [sessionToken]);
+
+  const leaveBattle = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'leaveBattle' }));
+      setGameState(null);
+    }
   }, []);
 
   const sendMessage = useCallback((message: ClientMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message));
     }
+  }, []);
+
+  const clearRankUp = useCallback(() => {
+    setLastRankUp(null);
+  }, []);
+
+  const clearXPGain = useCallback(() => {
+    setLastXPGain(null);
   }, []);
 
   useEffect(() => {
@@ -144,15 +217,25 @@ export const useGameConnection = (): UseGameConnectionReturn => {
   return {
     isConnected,
     isConnecting,
+    isAuthenticated,
     error,
     gameState,
     playerData,
     garageHulls,
     garageGuns,
     playerId,
+    sessionToken,
+    lastRankUp,
+    lastXPGain,
     connect,
     disconnect,
+    register,
+    login,
+    joinBattle,
+    leaveBattle,
     sendMessage,
+    clearRankUp,
+    clearXPGain,
     lastEvent,
   };
 };

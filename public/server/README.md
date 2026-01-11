@@ -15,70 +15,121 @@ This is the authoritative game server for Flag Wars. All game logic, physics, an
    npm start
    ```
 
+## Server Output
+
+When the server starts, it will display:
+- **Server IP**: Your local network IP (e.g., 192.168.1.100)
+- **Port**: 3001 (default)
+- **Local URL**: For testing on the same computer
+- **Public URL**: For players on your local network
+
+## Accessing from Anywhere
+
+### For Local Network (Same WiFi):
+Players on the same network can connect using your local IP (shown when server starts).
+
+### For Internet Access (Worldwide):
+1. **Port Forwarding**: Open port 3001 on your router
+   - Log into your router (usually 192.168.1.1)
+   - Find "Port Forwarding" settings
+   - Forward external port 3001 to your computer's IP, port 3001
+   
+2. **Find your Public IP**: Visit https://whatismyip.com
+   
+3. **Share with players**: Give them `ws://YOUR_PUBLIC_IP:3001`
+
+4. **Update client config**: In `src/config/serverConfig.ts`:
+   ```typescript
+   export const SERVER_CONFIG = {
+     host: 'YOUR_PUBLIC_IP',  // e.g., '203.45.67.89'
+     port: 3001,
+     protocol: 'ws',
+   };
+   ```
+
+## Running the Client
+
+The client is a web application that runs in a browser:
+
+### Option 1: Use Lovable's Preview
+1. Open your Lovable project
+2. Click the preview URL (shown in the right panel)
+3. Share that URL with players
+
+### Option 2: Self-Host
+1. Build the client:
+   ```bash
+   npm run build
+   ```
+2. Serve the `dist` folder with any web server
+
+### Option 3: Deploy to Hosting
+1. Click "Publish" in Lovable
+2. Share the published URL with players
+
 ## Configuration
 
-Edit `server.js` to change the server port and other settings:
+Edit `server.js` to change settings:
 
 ```javascript
 const CONFIG = {
-  PORT: 3001,              // WebSocket port
-  TICK_RATE: 60,           // Game updates per second
-  MAP_WIDTH: 1200,         // Map width in pixels
-  MAP_HEIGHT: 800,         // Map height in pixels
-  FLAG_PICKUP_RADIUS: 50,  // Distance to pick up flag
-  FLAG_CAPTURE_RADIUS: 50, // Distance to capture flag
-  RESPAWN_TIME: 3000,      // Respawn delay in ms
-  MATCH_DURATION: 600,     // Match length in seconds
-  SCORE_TO_WIN: 3,         // Captures needed to win
+  PORT: 3001,              // Server port
+  HOST: '0.0.0.0',         // Listen on all interfaces
+  TICK_RATE: 60,           // Updates per second
+  MAP_WIDTH: 1200,
+  MAP_HEIGHT: 800,
+  FLAG_PICKUP_RADIUS: 50,
+  FLAG_CAPTURE_RADIUS: 50,
+  RESPAWN_TIME: 3000,      // ms
+  MATCH_DURATION: 600,     // seconds
+  SCORE_TO_WIN: 3,
 };
 ```
 
 ## Files
 
-- `server.js` - Main server entry point, WebSocket handling
-- `physics.js` - Movement and collision detection
-- `hulls.js` - Tank hull definitions and stats
-- `guns.js` - Weapon definitions and shot effects
-- `walls.js` - Map obstacles and destructible walls
-- `database.js` - Player data persistence (JSON file)
-- `players.json` - Player data storage (auto-created)
+- `server.js` - Main server, WebSocket handling, game loop
+- `auth.js` - Password hashing, session management
+- `database.js` - Player data persistence
+- `ranks.js` - Rank definitions and XP calculations
+- `physics.js` - Movement, collision detection
+- `hulls.js` - Tank hull definitions
+- `guns.js` - Weapon definitions
+- `walls.js` - Map obstacles
+- `players.json` - Player accounts (auto-created)
+- `accounts.json` - Login credentials (auto-created)
 
-## Client Configuration
+## Authentication
 
-In the client app, edit `src/config/serverConfig.ts`:
+Players create accounts with username/password:
+- Passwords are hashed with PBKDF2 + salt
+- Sessions persist until server restart
+- All data is stored locally on the server
 
-```typescript
-export const SERVER_CONFIG = {
-  host: 'localhost',  // Server IP address
-  port: 3001,         // Server port
-  protocol: 'ws',     // Use 'wss' for secure connections
-};
-```
+## Rank System
 
-## Features
-
-- **Server-Authoritative**: All game logic runs on server
-- **Anti-Cheat**: Clients can't modify speed, health, damage, etc.
-- **Persistent Data**: Player progress saved to JSON file
-- **Console Logging**: See all game events in terminal
-- **Upgrade System**: M0-M20 upgrades for hulls and guns
-- **CTF Gameplay**: Capture the flag game mode
+29 ranks from Recruit to Legend:
+- Earn XP for kills (+10), flag captures (+50), participation
+- Ranks unlock automatically when XP threshold is reached
+- In-battle rank-up animation when you level up
 
 ## Console Output
 
-The server logs important events:
-- `[JOIN]` - Player connected
-- `[LEAVE]` - Player disconnected
-- `[SHOOT]` - Player fired weapon
+The server logs all events:
+- `[AUTH]` - Login/register
+- `[JOIN]` - Player joined battle
+- `[LEAVE]` - Player left
 - `[KILL]` - Player eliminated
 - `[FLAG]` - Flag picked up/dropped
 - `[CAPTURE]` - Flag captured
+- `[RANK]` - Rank up
 - `[PURCHASE]` - Item bought
 - `[UPGRADE]` - Item upgraded
 
 ## Security Notes
 
-- Never share the server files with players
-- Player data is stored locally in `players.json`
-- All game calculations happen server-side
-- Clients only send input commands (move, shoot, etc.)
+- All game calculations are server-side
+- Clients only send input commands
+- Passwords are hashed, never stored in plain text
+- Player data is stored in JSON files (not a real database)
+- For production, consider using a proper database

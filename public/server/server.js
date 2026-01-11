@@ -8,18 +8,22 @@
  */
 
 const WebSocket = require('ws');
+const os = require('os');
 const { v4: uuidv4 } = require('uuid');
+const { validateUsername, validatePassword } = require('./auth');
+const { getRankForXP, getNextRank, XP_REWARDS } = require('./ranks');
 
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   PORT: 3001,
-  TICK_RATE: 60, // Game updates per second
+  HOST: '0.0.0.0', // Listen on all network interfaces for global access
+  TICK_RATE: 60,
   MAP_WIDTH: 1200,
   MAP_HEIGHT: 800,
   FLAG_PICKUP_RADIUS: 50,
   FLAG_CAPTURE_RADIUS: 50,
   RESPAWN_TIME: 3000,
-  MATCH_DURATION: 600, // seconds
+  MATCH_DURATION: 600,
   SCORE_TO_WIN: 3,
 };
 
@@ -36,6 +40,9 @@ const db = new Database();
 const Physics = require('./physics');
 const physics = new Physics(CONFIG, WALLS);
 
+// ==================== ACTIVE SESSIONS ====================
+const activeSessions = new Map(); // odId -> { ws, sessionToken, battleStats }
+
 // ==================== GAME STATE ====================
 let gameState = {
   players: new Map(),
@@ -50,98 +57,224 @@ let gameState = {
   isRunning: true,
 };
 
-// ==================== WEBSOCKET SERVER ====================
-const wss = new WebSocket.Server({ port: CONFIG.PORT });
+// ==================== GET SERVER IP ====================
+function getServerIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
 
+const serverIP = getServerIP();
+
+// ==================== WEBSOCKET SERVER ====================
+const wss = new WebSocket.Server({ 
+  port: CONFIG.PORT,
+  host: CONFIG.HOST,
+});
+
+console.log('');
 console.log('═══════════════════════════════════════════════════════════');
 console.log('              FLAG WARS - GAME SERVER');
 console.log('═══════════════════════════════════════════════════════════');
-console.log(`  Server IP:   localhost`);
-console.log(`  Server Port: ${CONFIG.PORT}`);
-console.log(`  WebSocket:   ws://localhost:${CONFIG.PORT}`);
+console.log('');
+console.log(`  🌐 Server IP:      ${serverIP}`);
+console.log(`  🔌 Port:           ${CONFIG.PORT}`);
+console.log(`  🔗 Local URL:      ws://localhost:${CONFIG.PORT}`);
+console.log(`  🌍 Public URL:     ws://${serverIP}:${CONFIG.PORT}`);
+console.log('');
 console.log('═══════════════════════════════════════════════════════════');
+console.log('  📋 INSTRUCTIONS FOR CLIENTS:');
+console.log('');
+console.log('  1. Open the game in a web browser');
+console.log('  2. The client is at: https://lovable.dev/projects/YOUR_PROJECT_ID');
+console.log(`  3. Configure the client to connect to: ${serverIP}:${CONFIG.PORT}`);
+console.log('');
+console.log('  Note: Make sure port 3001 is open in your firewall!');
+console.log('  For internet access, set up port forwarding on your router.');
+console.log('═══════════════════════════════════════════════════════════');
+console.log('');
 console.log('  Waiting for players to connect...');
 console.log('');
 
-wss.on('connection', (ws) => {
-  const clientId = uuidv4();
+wss.on('connection', (ws, req) => {
+  const clientIP = req.socket.remoteAddress;
+  console.log(`[CONNECT] New connection from ${clientIP}`);
   
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data);
-      handleMessage(ws, clientId, message);
+      handleMessage(ws, message);
     } catch (err) {
       console.error(`[ERROR] Failed to parse message:`, err.message);
     }
   });
 
   ws.on('close', () => {
-    handleDisconnect(clientId);
+    handleDisconnect(ws);
   });
 
   ws.on('error', (err) => {
-    console.error(`[ERROR] WebSocket error for ${clientId}:`, err.message);
+    console.error(`[ERROR] WebSocket error:`, err.message);
   });
 });
 
 // ==================== MESSAGE HANDLERS ====================
-function handleMessage(ws, clientId, message) {
+function handleMessage(ws, message) {
   switch (message.type) {
-    case 'join':
-      handleJoin(ws, clientId, message.username);
+    case 'register':
+      handleRegister(ws, message.username, message.password);
+      break;
+    case 'login':
+      handleLogin(ws, message.username, message.password);
+      break;
+    case 'joinBattle':
+      handleJoinBattle(ws, message.sessionToken);
       break;
     case 'move':
-      handleMove(clientId, message.direction);
+      handleMove(ws, message.direction);
       break;
     case 'rotate':
-      handleRotate(clientId, message.angle);
+      handleRotate(ws, message.angle);
       break;
     case 'rotateTurret':
-      handleRotateTurret(clientId, message.angle);
+      handleRotateTurret(ws, message.angle);
       break;
     case 'shoot':
-      handleShoot(clientId);
+      handleShoot(ws);
       break;
     case 'interact':
-      handleInteract(clientId);
+      handleInteract(ws);
       break;
     case 'getGarage':
-      handleGetGarage(ws, clientId);
+      handleGetGarage(ws, message.sessionToken);
       break;
     case 'buyHull':
-      handleBuyHull(ws, clientId, message.hullId);
+      handleBuyHull(ws, message.sessionToken, message.hullId);
       break;
     case 'buyGun':
-      handleBuyGun(ws, clientId, message.gunId);
+      handleBuyGun(ws, message.sessionToken, message.gunId);
       break;
     case 'upgradeHull':
-      handleUpgradeHull(ws, clientId, message.hullId);
+      handleUpgradeHull(ws, message.sessionToken, message.hullId);
       break;
     case 'upgradeGun':
-      handleUpgradeGun(ws, clientId, message.gunId);
+      handleUpgradeGun(ws, message.sessionToken, message.gunId);
       break;
     case 'equipHull':
-      handleEquipHull(ws, clientId, message.hullId);
+      handleEquipHull(ws, message.sessionToken, message.hullId);
       break;
     case 'equipGun':
-      handleEquipGun(ws, clientId, message.gunId);
+      handleEquipGun(ws, message.sessionToken, message.gunId);
+      break;
+    case 'leaveBattle':
+      handleLeaveBattle(ws);
       break;
   }
 }
 
-function handleJoin(ws, clientId, username) {
-  console.log(`[JOIN] Player "${username}" connected (ID: ${clientId.substring(0, 8)})`);
-  
-  // Get or create player data from database
-  let playerData = db.getPlayer(clientId);
-  if (!playerData) {
-    playerData = db.createPlayer(clientId, username);
-  } else {
-    playerData.username = username;
-    db.savePlayer(clientId, playerData);
+function handleRegister(ws, username, password) {
+  // Validate inputs
+  const usernameValidation = validateUsername(username);
+  if (!usernameValidation.valid) {
+    return sendError(ws, usernameValidation.error);
   }
 
-  // Assign team (balance teams)
+  const passwordValidation = validatePassword(password);
+  if (!passwordValidation.valid) {
+    return sendError(ws, passwordValidation.error);
+  }
+
+  // Try to register
+  const result = db.register(username, password);
+  
+  if (!result.success) {
+    return sendError(ws, result.error);
+  }
+
+  // Store session
+  ws.sessionToken = result.sessionToken;
+  ws.odId = result.odId;
+
+  // Add rank info to player data
+  const rankInfo = getRankForXP(result.playerData.xp || 0);
+  const nextRankInfo = getNextRank(result.playerData.xp || 0);
+
+  ws.send(JSON.stringify({
+    type: 'authSuccess',
+    sessionToken: result.sessionToken,
+    playerData: {
+      ...result.playerData,
+      rank: rankInfo,
+      nextRank: nextRankInfo,
+    },
+  }));
+}
+
+function handleLogin(ws, username, password) {
+  // Validate inputs
+  const usernameValidation = validateUsername(username);
+  if (!usernameValidation.valid) {
+    return sendError(ws, usernameValidation.error);
+  }
+
+  const passwordValidation = validatePassword(password);
+  if (!passwordValidation.valid) {
+    return sendError(ws, passwordValidation.error);
+  }
+
+  // Try to login
+  const result = db.login(username, password);
+  
+  if (!result.success) {
+    return sendError(ws, result.error);
+  }
+
+  // Store session
+  ws.sessionToken = result.sessionToken;
+  ws.odId = result.odId;
+
+  // Add rank info to player data
+  const rankInfo = getRankForXP(result.playerData.xp || 0);
+  const nextRankInfo = getNextRank(result.playerData.xp || 0);
+
+  console.log(`[AUTH] ${username} logged in (Rank: ${rankInfo.name})`);
+
+  ws.send(JSON.stringify({
+    type: 'authSuccess',
+    sessionToken: result.sessionToken,
+    playerData: {
+      ...result.playerData,
+      rank: rankInfo,
+      nextRank: nextRankInfo,
+    },
+  }));
+}
+
+function handleJoinBattle(ws, sessionToken) {
+  const odId = db.validateSession(sessionToken);
+  if (!odId) {
+    return sendError(ws, 'Invalid session. Please login again.');
+  }
+
+  const playerData = db.getPlayer(odId);
+  if (!playerData) {
+    return sendError(ws, 'Player data not found');
+  }
+
+  console.log(`[JOIN] Player "${playerData.username}" joining battle`);
+
+  // Remove from previous battle if any
+  if (gameState.players.has(odId)) {
+    gameState.players.delete(odId);
+  }
+
+  // Assign team
   const redCount = [...gameState.players.values()].filter(p => p.team === 'red').length;
   const blueCount = [...gameState.players.values()].filter(p => p.team === 'blue').length;
   const team = redCount <= blueCount ? 'red' : 'blue';
@@ -156,9 +289,9 @@ function handleJoin(ws, clientId, username) {
 
   // Create player object
   const player = {
-    id: clientId,
+    id: odId,
     ws,
-    username,
+    username: playerData.username,
     position: team === 'red' ? { x: 100, y: 400 } : { x: 1100, y: 400 },
     rotation: team === 'red' ? 0 : Math.PI,
     turretRotation: team === 'red' ? 0 : Math.PI,
@@ -170,15 +303,24 @@ function handleJoin(ws, clientId, username) {
     hasFlag: false,
     isAlive: true,
     lastShot: 0,
+    xp: playerData.xp || 0,
+    rank: getRankForXP(playerData.xp || 0),
+    battleStats: { kills: 0, deaths: 0, flagCaptures: 0, damageDealt: 0 },
+    battleStartTime: Date.now(),
   };
 
-  gameState.players.set(clientId, player);
+  gameState.players.set(odId, player);
 
   // Send welcome message
   ws.send(JSON.stringify({
-    type: 'welcome',
-    playerId: clientId,
-    playerData,
+    type: 'battleJoined',
+    playerId: odId,
+    team,
+    playerData: {
+      ...playerData,
+      rank: player.rank,
+      nextRank: getNextRank(playerData.xp || 0),
+    },
   }));
 
   // Broadcast player joined
@@ -188,47 +330,77 @@ function handleJoin(ws, clientId, username) {
   });
 }
 
-function handleDisconnect(clientId) {
-  const player = gameState.players.get(clientId);
-  if (player) {
-    console.log(`[LEAVE] Player "${player.username}" disconnected`);
+function handleDisconnect(ws) {
+  // Find player by websocket
+  let disconnectedPlayer = null;
+  let disconnectedId = null;
+  
+  for (const [id, player] of gameState.players) {
+    if (player.ws === ws) {
+      disconnectedPlayer = player;
+      disconnectedId = id;
+      break;
+    }
+  }
+
+  if (disconnectedPlayer) {
+    console.log(`[LEAVE] Player "${disconnectedPlayer.username}" disconnected`);
+    
+    // Award participation XP
+    const battleDuration = (Date.now() - disconnectedPlayer.battleStartTime) / 60000; // minutes
+    const participationXP = Math.floor(battleDuration * XP_REWARDS.participation);
+    if (participationXP > 0) {
+      db.addXP(disconnectedId, participationXP);
+    }
     
     // Drop flag if carrying
-    if (player.hasFlag) {
-      const flag = gameState.flags.find(f => f.carriedBy === clientId);
+    if (disconnectedPlayer.hasFlag) {
+      const flag = gameState.flags.find(f => f.carriedBy === disconnectedId);
       if (flag) {
         flag.carriedBy = null;
-        flag.position = { ...player.position };
+        flag.position = { ...disconnectedPlayer.position };
         flag.isAtBase = false;
-        console.log(`[FLAG] ${player.username} dropped the ${flag.team} flag`);
+        console.log(`[FLAG] ${disconnectedPlayer.username} dropped the ${flag.team} flag`);
       }
     }
 
-    gameState.players.delete(clientId);
+    gameState.players.delete(disconnectedId);
     
     broadcast({
       type: 'playerLeft',
-      playerId: clientId,
+      playerId: disconnectedId,
     });
   }
 }
 
-function handleMove(clientId, direction) {
-  const player = gameState.players.get(clientId);
-  if (!player || !player.isAlive) return;
+function handleLeaveBattle(ws) {
+  handleDisconnect(ws);
+}
 
+function getPlayerFromWs(ws) {
+  for (const [id, player] of gameState.players) {
+    if (player.ws === ws) {
+      return { id, player };
+    }
+  }
+  return null;
+}
+
+function handleMove(ws, direction) {
+  const result = getPlayerFromWs(ws);
+  if (!result || !result.player.isAlive) return;
+
+  const { id: clientId, player } = result;
   const hull = player.hull;
-  const hullLevel = db.getPlayer(clientId)?.hullUpgrades[hull.id] || 0;
+  const playerData = db.getPlayer(clientId);
+  const hullLevel = playerData?.hullUpgrades[hull.id] || 0;
   const speed = Math.floor(hull.baseSpeed * (1 + hullLevel * 0.05));
 
-  // Calculate new position (server authoritative)
   const newPos = physics.movePlayer(player.position, direction, speed);
   
-  // Check wall collisions
   if (!physics.checkWallCollision(newPos, 20)) {
     player.position = newPos;
     
-    // Update flag position if carrying
     if (player.hasFlag) {
       const flag = gameState.flags.find(f => f.carriedBy === clientId);
       if (flag) {
@@ -238,34 +410,35 @@ function handleMove(clientId, direction) {
   }
 }
 
-function handleRotate(clientId, angle) {
-  const player = gameState.players.get(clientId);
-  if (player) {
-    player.rotation = angle;
+function handleRotate(ws, angle) {
+  const result = getPlayerFromWs(ws);
+  if (result) {
+    result.player.rotation = angle;
   }
 }
 
-function handleRotateTurret(clientId, angle) {
-  const player = gameState.players.get(clientId);
-  if (player) {
-    player.turretRotation = angle;
+function handleRotateTurret(ws, angle) {
+  const result = getPlayerFromWs(ws);
+  if (result) {
+    result.player.turretRotation = angle;
   }
 }
 
-function handleShoot(clientId) {
-  const player = gameState.players.get(clientId);
-  if (!player || !player.isAlive) return;
+function handleShoot(ws) {
+  const result = getPlayerFromWs(ws);
+  if (!result || !result.player.isAlive) return;
 
+  const { id: clientId, player } = result;
   const now = Date.now();
   const gun = player.gun;
-  const gunLevel = db.getPlayer(clientId)?.gunUpgrades[gun.id] || 0;
+  const playerData = db.getPlayer(clientId);
+  const gunLevel = playerData?.gunUpgrades[gun.id] || 0;
   const reloadTime = Math.max(50, gun.reloadTime - gunLevel * 20);
 
   if (now - player.lastShot < reloadTime) return;
 
   player.lastShot = now;
 
-  // Create projectile
   const damage = Math.floor(gun.baseDamage * (1 + gunLevel * 0.05));
   const projectile = {
     id: uuidv4(),
@@ -282,12 +455,13 @@ function handleShoot(clientId) {
   };
 
   gameState.projectiles.push(projectile);
-  console.log(`[SHOOT] ${player.username} fired ${gun.name}`);
 }
 
-function handleInteract(clientId) {
-  const player = gameState.players.get(clientId);
-  if (!player || !player.isAlive) return;
+function handleInteract(ws) {
+  const result = getPlayerFromWs(ws);
+  if (!result || !result.player.isAlive) return;
+
+  const { id: clientId, player } = result;
 
   // Check if near enemy flag
   const enemyFlag = gameState.flags.find(f => 
@@ -297,7 +471,6 @@ function handleInteract(clientId) {
   );
 
   if (enemyFlag && !player.hasFlag) {
-    // Pick up enemy flag
     enemyFlag.carriedBy = clientId;
     enemyFlag.isAtBase = false;
     player.hasFlag = true;
@@ -316,7 +489,6 @@ function handleInteract(clientId) {
   if (player.hasFlag) {
     const ownFlag = gameState.flags.find(f => f.team === player.team);
     if (ownFlag && physics.distance(player.position, ownFlag.position) < CONFIG.FLAG_CAPTURE_RADIUS) {
-      // Capture the flag!
       const enemyFlagCarried = gameState.flags.find(f => f.carriedBy === clientId);
       if (enemyFlagCarried) {
         enemyFlagCarried.carriedBy = null;
@@ -326,19 +498,34 @@ function handleInteract(clientId) {
         enemyFlagCarried.isAtBase = true;
         player.hasFlag = false;
 
-        // Update score
         if (player.team === 'red') {
           gameState.redScore++;
         } else {
           gameState.blueScore++;
         }
 
-        // Update player stats
+        // Update stats and award XP
         const playerData = db.getPlayer(clientId);
         if (playerData) {
           playerData.stats.flagCaptures++;
-          playerData.money += 500; // Reward for capture
+          playerData.money += 500;
           db.savePlayer(clientId, playerData);
+        }
+        
+        player.battleStats.flagCaptures++;
+        
+        // Award XP for flag capture
+        const xpResult = db.awardFlagCaptureXP(clientId);
+        if (xpResult && xpResult.rankedUp) {
+          // Send rankup notification
+          player.ws.send(JSON.stringify({
+            type: 'rankUp',
+            oldRank: xpResult.oldRank,
+            newRank: xpResult.newRank,
+            newXP: xpResult.newXP,
+          }));
+          player.rank = xpResult.newRank;
+          console.log(`[RANK] ${player.username} ranked up to ${xpResult.newRank.name}!`);
         }
 
         console.log(`[CAPTURE] ${player.username} captured the flag! Score: Red ${gameState.redScore} - Blue ${gameState.blueScore}`);
@@ -353,174 +540,189 @@ function handleInteract(clientId) {
   }
 }
 
-function handleGetGarage(ws, clientId) {
-  const playerData = db.getPlayer(clientId);
+function handleGetGarage(ws, sessionToken) {
+  const odId = db.validateSession(sessionToken);
+  if (!odId) {
+    return sendError(ws, 'Invalid session');
+  }
+
+  const playerData = db.getPlayer(odId);
+  const rankInfo = getRankForXP(playerData.xp || 0);
+  const nextRankInfo = getNextRank(playerData.xp || 0);
   
   ws.send(JSON.stringify({
     type: 'garageData',
     hulls: HULLS,
     guns: GUNS,
-    playerData,
+    playerData: {
+      ...playerData,
+      rank: rankInfo,
+      nextRank: nextRankInfo,
+    },
   }));
 }
 
-function handleBuyHull(ws, clientId, hullId) {
-  const playerData = db.getPlayer(clientId);
+function handleBuyHull(ws, sessionToken, hullId) {
+  const odId = db.validateSession(sessionToken);
+  if (!odId) return sendError(ws, 'Invalid session');
+
+  const playerData = db.getPlayer(odId);
   const hull = HULLS.find(h => h.id === hullId);
   
-  if (!hull) {
-    return sendError(ws, 'Hull not found');
-  }
-  
-  if (playerData.ownedHulls.includes(hullId)) {
-    return sendError(ws, 'Hull already owned');
-  }
-  
-  if (playerData.money < hull.price) {
-    return sendError(ws, 'Not enough money');
-  }
+  if (!hull) return sendError(ws, 'Hull not found');
+  if (playerData.ownedHulls.includes(hullId)) return sendError(ws, 'Hull already owned');
+  if (playerData.money < hull.price) return sendError(ws, 'Not enough money');
 
   playerData.money -= hull.price;
   playerData.ownedHulls.push(hullId);
   playerData.hullUpgrades[hullId] = 0;
-  db.savePlayer(clientId, playerData);
+  db.savePlayer(odId, playerData);
 
   console.log(`[PURCHASE] ${playerData.username} bought ${hull.name}`);
+
+  const rankInfo = getRankForXP(playerData.xp || 0);
+  const nextRankInfo = getNextRank(playerData.xp || 0);
 
   ws.send(JSON.stringify({
     type: 'purchaseResult',
     success: true,
     message: `Purchased ${hull.name}!`,
-    playerData,
+    playerData: { ...playerData, rank: rankInfo, nextRank: nextRankInfo },
   }));
 }
 
-function handleBuyGun(ws, clientId, gunId) {
-  const playerData = db.getPlayer(clientId);
+function handleBuyGun(ws, sessionToken, gunId) {
+  const odId = db.validateSession(sessionToken);
+  if (!odId) return sendError(ws, 'Invalid session');
+
+  const playerData = db.getPlayer(odId);
   const gun = GUNS.find(g => g.id === gunId);
   
-  if (!gun) {
-    return sendError(ws, 'Gun not found');
-  }
-  
-  if (playerData.ownedGuns.includes(gunId)) {
-    return sendError(ws, 'Gun already owned');
-  }
-  
-  if (playerData.money < gun.price) {
-    return sendError(ws, 'Not enough money');
-  }
+  if (!gun) return sendError(ws, 'Gun not found');
+  if (playerData.ownedGuns.includes(gunId)) return sendError(ws, 'Gun already owned');
+  if (playerData.money < gun.price) return sendError(ws, 'Not enough money');
 
   playerData.money -= gun.price;
   playerData.ownedGuns.push(gunId);
   playerData.gunUpgrades[gunId] = 0;
-  db.savePlayer(clientId, playerData);
+  db.savePlayer(odId, playerData);
 
   console.log(`[PURCHASE] ${playerData.username} bought ${gun.name}`);
+
+  const rankInfo = getRankForXP(playerData.xp || 0);
+  const nextRankInfo = getNextRank(playerData.xp || 0);
 
   ws.send(JSON.stringify({
     type: 'purchaseResult',
     success: true,
     message: `Purchased ${gun.name}!`,
-    playerData,
+    playerData: { ...playerData, rank: rankInfo, nextRank: nextRankInfo },
   }));
 }
 
-function handleUpgradeHull(ws, clientId, hullId) {
-  const playerData = db.getPlayer(clientId);
+function handleUpgradeHull(ws, sessionToken, hullId) {
+  const odId = db.validateSession(sessionToken);
+  if (!odId) return sendError(ws, 'Invalid session');
+
+  const playerData = db.getPlayer(odId);
   
-  if (!playerData.ownedHulls.includes(hullId)) {
-    return sendError(ws, 'Hull not owned');
-  }
+  if (!playerData.ownedHulls.includes(hullId)) return sendError(ws, 'Hull not owned');
 
   const currentLevel = playerData.hullUpgrades[hullId] || 0;
-  if (currentLevel >= 20) {
-    return sendError(ws, 'Hull already at max level');
-  }
+  if (currentLevel >= 20) return sendError(ws, 'Hull already at max level');
 
   const cost = Math.floor(1000 * Math.pow(1.5, currentLevel));
-  if (playerData.money < cost) {
-    return sendError(ws, 'Not enough money');
-  }
+  if (playerData.money < cost) return sendError(ws, 'Not enough money');
 
   playerData.money -= cost;
   playerData.hullUpgrades[hullId] = currentLevel + 1;
-  db.savePlayer(clientId, playerData);
+  db.savePlayer(odId, playerData);
 
   console.log(`[UPGRADE] ${playerData.username} upgraded ${hullId} to M${currentLevel + 1}`);
 
+  const rankInfo = getRankForXP(playerData.xp || 0);
+  const nextRankInfo = getNextRank(playerData.xp || 0);
+
   ws.send(JSON.stringify({
     type: 'upgradeResult',
     success: true,
     message: `Upgraded to M${currentLevel + 1}!`,
-    playerData,
+    playerData: { ...playerData, rank: rankInfo, nextRank: nextRankInfo },
   }));
 }
 
-function handleUpgradeGun(ws, clientId, gunId) {
-  const playerData = db.getPlayer(clientId);
+function handleUpgradeGun(ws, sessionToken, gunId) {
+  const odId = db.validateSession(sessionToken);
+  if (!odId) return sendError(ws, 'Invalid session');
+
+  const playerData = db.getPlayer(odId);
   
-  if (!playerData.ownedGuns.includes(gunId)) {
-    return sendError(ws, 'Gun not owned');
-  }
+  if (!playerData.ownedGuns.includes(gunId)) return sendError(ws, 'Gun not owned');
 
   const currentLevel = playerData.gunUpgrades[gunId] || 0;
-  if (currentLevel >= 20) {
-    return sendError(ws, 'Gun already at max level');
-  }
+  if (currentLevel >= 20) return sendError(ws, 'Gun already at max level');
 
   const cost = Math.floor(1000 * Math.pow(1.5, currentLevel));
-  if (playerData.money < cost) {
-    return sendError(ws, 'Not enough money');
-  }
+  if (playerData.money < cost) return sendError(ws, 'Not enough money');
 
   playerData.money -= cost;
   playerData.gunUpgrades[gunId] = currentLevel + 1;
-  db.savePlayer(clientId, playerData);
+  db.savePlayer(odId, playerData);
 
   console.log(`[UPGRADE] ${playerData.username} upgraded ${gunId} to M${currentLevel + 1}`);
+
+  const rankInfo = getRankForXP(playerData.xp || 0);
+  const nextRankInfo = getNextRank(playerData.xp || 0);
 
   ws.send(JSON.stringify({
     type: 'upgradeResult',
     success: true,
     message: `Upgraded to M${currentLevel + 1}!`,
-    playerData,
+    playerData: { ...playerData, rank: rankInfo, nextRank: nextRankInfo },
   }));
 }
 
-function handleEquipHull(ws, clientId, hullId) {
-  const playerData = db.getPlayer(clientId);
+function handleEquipHull(ws, sessionToken, hullId) {
+  const odId = db.validateSession(sessionToken);
+  if (!odId) return sendError(ws, 'Invalid session');
+
+  const playerData = db.getPlayer(odId);
   
-  if (!playerData.ownedHulls.includes(hullId)) {
-    return sendError(ws, 'Hull not owned');
-  }
+  if (!playerData.ownedHulls.includes(hullId)) return sendError(ws, 'Hull not owned');
 
   playerData.equippedHull = hullId;
-  db.savePlayer(clientId, playerData);
+  db.savePlayer(odId, playerData);
+
+  const rankInfo = getRankForXP(playerData.xp || 0);
+  const nextRankInfo = getNextRank(playerData.xp || 0);
 
   ws.send(JSON.stringify({
     type: 'purchaseResult',
     success: true,
     message: 'Hull equipped!',
-    playerData,
+    playerData: { ...playerData, rank: rankInfo, nextRank: nextRankInfo },
   }));
 }
 
-function handleEquipGun(ws, clientId, gunId) {
-  const playerData = db.getPlayer(clientId);
+function handleEquipGun(ws, sessionToken, gunId) {
+  const odId = db.validateSession(sessionToken);
+  if (!odId) return sendError(ws, 'Invalid session');
+
+  const playerData = db.getPlayer(odId);
   
-  if (!playerData.ownedGuns.includes(gunId)) {
-    return sendError(ws, 'Gun not owned');
-  }
+  if (!playerData.ownedGuns.includes(gunId)) return sendError(ws, 'Gun not owned');
 
   playerData.equippedGun = gunId;
-  db.savePlayer(clientId, playerData);
+  db.savePlayer(odId, playerData);
+
+  const rankInfo = getRankForXP(playerData.xp || 0);
+  const nextRankInfo = getNextRank(playerData.xp || 0);
 
   ws.send(JSON.stringify({
     type: 'purchaseResult',
     success: true,
     message: 'Gun equipped!',
-    playerData,
+    playerData: { ...playerData, rank: rankInfo, nextRank: nextRankInfo },
   }));
 }
 
@@ -530,7 +732,7 @@ function sendError(ws, message) {
 }
 
 function sanitizePlayer(player) {
-  const { ws, lastShot, ...rest } = player;
+  const { ws, lastShot, battleStartTime, battleStats, ...rest } = player;
   return rest;
 }
 
@@ -547,46 +749,65 @@ function broadcast(message) {
 function gameLoop() {
   if (!gameState.isRunning) return;
 
-  // Update projectiles
   const now = Date.now();
   gameState.projectiles = gameState.projectiles.filter(proj => {
-    // Move projectile
     proj.position.x += proj.velocity.x;
     proj.position.y += proj.velocity.y;
 
-    // Check bounds
     if (proj.position.x < 0 || proj.position.x > CONFIG.MAP_WIDTH ||
         proj.position.y < 0 || proj.position.y > CONFIG.MAP_HEIGHT) {
       return false;
     }
 
-    // Check wall collision
     if (physics.checkWallCollision(proj.position, 5)) {
       return false;
     }
 
-    // Check player collision
     for (const [playerId, player] of gameState.players) {
       if (playerId === proj.ownerId) continue;
       if (!player.isAlive) continue;
 
       if (physics.distance(proj.position, player.position) < 25) {
-        // Hit!
         player.health -= proj.damage;
         
         const shooter = gameState.players.get(proj.ownerId);
+        if (shooter) {
+          shooter.battleStats.damageDealt += proj.damage;
+        }
         
         if (player.health <= 0) {
           player.isAlive = false;
           console.log(`[KILL] ${shooter?.username || 'Unknown'} killed ${player.username}`);
           
-          // Update stats
           if (shooter) {
             const shooterData = db.getPlayer(proj.ownerId);
             if (shooterData) {
               shooterData.stats.kills++;
               shooterData.money += 100;
               db.savePlayer(proj.ownerId, shooterData);
+            }
+            shooter.battleStats.kills++;
+            
+            // Award XP for kill
+            const xpResult = db.awardKillXP(proj.ownerId);
+            if (xpResult && xpResult.rankedUp) {
+              shooter.ws.send(JSON.stringify({
+                type: 'rankUp',
+                oldRank: xpResult.oldRank,
+                newRank: xpResult.newRank,
+                newXP: xpResult.newXP,
+              }));
+              shooter.rank = xpResult.newRank;
+              console.log(`[RANK] ${shooter.username} ranked up to ${xpResult.newRank.name}!`);
+            } else if (xpResult) {
+              // Send XP gain notification
+              shooter.ws.send(JSON.stringify({
+                type: 'xpGain',
+                amount: xpResult.xpGained,
+                newXP: xpResult.newXP,
+                currentRank: xpResult.currentRank,
+                nextRank: xpResult.nextRankInfo,
+              }));
             }
           }
           
@@ -595,8 +816,8 @@ function gameLoop() {
             victimData.stats.deaths++;
             db.savePlayer(playerId, victimData);
           }
+          player.battleStats.deaths++;
 
-          // Drop flag if carrying
           if (player.hasFlag) {
             const flag = gameState.flags.find(f => f.carriedBy === playerId);
             if (flag) {
@@ -607,7 +828,6 @@ function gameLoop() {
             player.hasFlag = false;
           }
 
-          // Schedule respawn
           setTimeout(() => {
             const respawnPlayer = gameState.players.get(playerId);
             if (respawnPlayer) {
@@ -630,7 +850,6 @@ function gameLoop() {
       }
     }
 
-    // Remove old projectiles
     if (now - proj.createdAt > 5000) {
       return false;
     }
@@ -638,7 +857,6 @@ function gameLoop() {
     return true;
   });
 
-  // Broadcast game state
   const stateMessage = {
     type: 'gameState',
     state: {
@@ -656,10 +874,8 @@ function gameLoop() {
   broadcast(stateMessage);
 }
 
-// Start game loop
 setInterval(gameLoop, 1000 / CONFIG.TICK_RATE);
 
-// Timer countdown
 setInterval(() => {
   if (gameState.timeRemaining > 0 && gameState.isRunning) {
     gameState.timeRemaining--;

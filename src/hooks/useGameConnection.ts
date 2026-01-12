@@ -10,6 +10,8 @@ import {
   XPGainEvent,
   RankUpEvent,
 } from '@/lib/gameTypes';
+import { KillFeedEvent } from '@/components/game/KillFeed';
+import { ChatMessage } from '@/components/game/TeamChat';
 
 interface UseGameConnectionReturn {
   isConnected: boolean;
@@ -24,6 +26,8 @@ interface UseGameConnectionReturn {
   sessionToken: string | null;
   lastRankUp: RankUpEvent | null;
   lastXPGain: XPGainEvent | null;
+  killFeedEvents: KillFeedEvent[];
+  chatMessages: ChatMessage[];
   connect: () => void;
   disconnect: () => void;
   register: (username: string, password: string) => void;
@@ -31,6 +35,7 @@ interface UseGameConnectionReturn {
   joinBattle: () => void;
   leaveBattle: () => void;
   sendMessage: (message: ClientMessage) => void;
+  sendChatMessage: (message: string) => void;
   clearRankUp: () => void;
   clearXPGain: () => void;
   lastEvent: ServerMessage | null;
@@ -50,6 +55,8 @@ export const useGameConnection = (): UseGameConnectionReturn => {
   const [lastEvent, setLastEvent] = useState<ServerMessage | null>(null);
   const [lastRankUp, setLastRankUp] = useState<RankUpEvent | null>(null);
   const [lastXPGain, setLastXPGain] = useState<XPGainEvent | null>(null);
+  const [killFeedEvents, setKillFeedEvents] = useState<KillFeedEvent[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -110,6 +117,59 @@ export const useGameConnection = (): UseGameConnectionReturn => {
             rank: message.currentRank,
             nextRank: message.nextRank,
           } : null);
+          break;
+        case 'playerKilled':
+          setKillFeedEvents(prev => [...prev.slice(-20), {
+            id: `kill-${Date.now()}`,
+            type: 'kill',
+            killerName: message.killerName,
+            killerTeam: message.killerTeam,
+            victimName: message.victimName,
+            victimTeam: message.victimTeam,
+            timestamp: Date.now(),
+          }]);
+          break;
+
+        case 'flagPickup':
+          setKillFeedEvents(prev => [...prev.slice(-20), {
+            id: `pickup-${Date.now()}`,
+            type: 'flagPickup',
+            playerName: message.playerName,
+            playerTeam: message.playerTeam,
+            flagTeam: message.flagTeam,
+            timestamp: Date.now(),
+          }]);
+          break;
+
+        case 'flagCapture':
+          setKillFeedEvents(prev => [...prev.slice(-20), {
+            id: `capture-${Date.now()}`,
+            type: 'flagCapture',
+            playerName: message.playerName,
+            playerTeam: message.playerTeam,
+            timestamp: Date.now(),
+          }]);
+          break;
+
+        case 'flagReturn':
+          setKillFeedEvents(prev => [...prev.slice(-20), {
+            id: `return-${Date.now()}`,
+            type: 'flagReturn',
+            playerName: message.playerName,
+            playerTeam: message.playerTeam,
+            flagTeam: message.flagTeam,
+            timestamp: Date.now(),
+          }]);
+          break;
+
+        case 'teamChat':
+          setChatMessages(prev => [...prev.slice(-50), {
+            id: `chat-${Date.now()}`,
+            playerName: message.playerName,
+            team: message.team,
+            message: message.message,
+            timestamp: Date.now(),
+          }]);
           break;
           
         case 'error':
@@ -196,6 +256,14 @@ export const useGameConnection = (): UseGameConnectionReturn => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'leaveBattle' }));
       setGameState(null);
+      setKillFeedEvents([]);
+      setChatMessages([]);
+    }
+  }, []);
+
+  const sendChatMessage = useCallback((message: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'teamChat', message }));
     }
   }, []);
 
@@ -232,6 +300,8 @@ export const useGameConnection = (): UseGameConnectionReturn => {
     sessionToken,
     lastRankUp,
     lastXPGain,
+    killFeedEvents,
+    chatMessages,
     connect,
     disconnect,
     register,
@@ -239,6 +309,7 @@ export const useGameConnection = (): UseGameConnectionReturn => {
     joinBattle,
     leaveBattle,
     sendMessage,
+    sendChatMessage,
     clearRankUp,
     clearXPGain,
     lastEvent,

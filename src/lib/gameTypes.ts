@@ -150,6 +150,7 @@ export type ClientMessage =
   | { type: 'rotateTurret'; angle: number }
   | { type: 'shoot' }
   | { type: 'interact' }
+  | { type: 'teamChat'; message: string }
   | { type: 'getGarage'; sessionToken: string }
   | { type: 'buyHull'; sessionToken: string; hullId: string }
   | { type: 'buyGun'; sessionToken: string; gunId: string }
@@ -164,10 +165,11 @@ export type ServerMessage =
   | { type: 'gameState'; state: GameState }
   | { type: 'playerJoined'; player: Player }
   | { type: 'playerLeft'; playerId: string }
-  | { type: 'playerKilled'; killerId: string; victimId: string }
-  | { type: 'flagPickup'; playerId: string; flagTeam: 'red' | 'blue' }
-  | { type: 'flagCapture'; playerId: string; team: 'red' | 'blue' }
-  | { type: 'flagReturn'; playerId: string; flagTeam: 'red' | 'blue' }
+  | { type: 'playerKilled'; killerId: string; victimId: string; killerName: string; victimName: string; killerTeam: 'red' | 'blue'; victimTeam: 'red' | 'blue' }
+  | { type: 'flagPickup'; playerId: string; playerName: string; playerTeam: 'red' | 'blue'; flagTeam: 'red' | 'blue' }
+  | { type: 'flagCapture'; playerId: string; playerName: string; playerTeam: 'red' | 'blue'; team: 'red' | 'blue' }
+  | { type: 'flagReturn'; playerId: string; playerName: string; playerTeam: 'red' | 'blue'; flagTeam: 'red' | 'blue' }
+  | { type: 'teamChat'; playerId: string; playerName: string; team: 'red' | 'blue'; message: string }
   | { type: 'garageData'; hulls: Hull[]; guns: Gun[]; playerData: PlayerData }
   | { type: 'purchaseResult'; success: boolean; message: string; playerData?: PlayerData }
   | { type: 'upgradeResult'; success: boolean; message: string; playerData?: PlayerData }

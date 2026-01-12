@@ -7,17 +7,22 @@ import { RankUpOverlay } from './RankUpOverlay';
 import { XPGainIndicator } from './XPGainIndicator';
 import { GameState, Vector2, PlayerData, XPGainEvent, RankUpEvent } from '@/lib/gameTypes';
 import { useSound } from '@/contexts/SoundContext';
+import { KillFeedEvent } from './KillFeed';
+import { ChatMessage } from './TeamChat';
 
 interface GameProps {
   gameState: GameState | null;
   playerId: string | null;
   playerData: PlayerData | null;
+  killFeedEvents: KillFeedEvent[];
+  chatMessages: ChatMessage[];
   onMove: (direction: Vector2) => void;
   onRotate: (angle: number) => void;
   onRotateTurret: (angle: number) => void;
   onShoot: () => void;
   onInteract: () => void;
   onExitBattle: () => void;
+  onSendChatMessage: (message: string) => void;
   lastRankUp: RankUpEvent | null;
   lastXPGain: XPGainEvent | null;
   onClearRankUp: () => void;
@@ -28,12 +33,15 @@ export const Game = ({
   gameState,
   playerId,
   playerData,
+  killFeedEvents,
+  chatMessages,
   onMove,
   onRotate,
   onRotateTurret,
   onShoot,
   onInteract,
   onExitBattle,
+  onSendChatMessage,
   lastRankUp,
   lastXPGain,
   onClearRankUp,
@@ -196,7 +204,11 @@ export const Game = ({
         <GameHUD
           gameState={gameState}
           currentPlayer={currentPlayer}
+          playerData={playerData}
+          killFeedEvents={killFeedEvents}
+          chatMessages={chatMessages}
           onExitBattle={onExitBattle}
+          onSendChatMessage={onSendChatMessage}
         />
         
         {/* Sound Controls */}

@@ -80,12 +80,15 @@ const Index = () => {
     sessionToken,
     lastRankUp,
     lastXPGain,
+    killFeedEvents,
+    chatMessages,
     connect,
     register,
     login,
     joinBattle,
     leaveBattle,
     sendMessage,
+    sendChatMessage,
     clearRankUp,
     clearXPGain,
   } = useGameConnection();
@@ -343,12 +346,15 @@ const Index = () => {
           gameState={gameState}
           playerId={currentPlayerId}
           playerData={playerData}
+          killFeedEvents={killFeedEvents}
+          chatMessages={chatMessages}
           onMove={handleMove}
           onRotate={handleRotate}
           onRotateTurret={handleRotateTurret}
           onShoot={handleShoot}
           onInteract={handleInteract}
           onExitBattle={handleExitBattle}
+          onSendChatMessage={sendChatMessage}
           lastRankUp={lastRankUp}
           lastXPGain={lastXPGain}
           onClearRankUp={clearRankUp}

@@ -1,14 +1,45 @@
-import { GameState, Player } from '@/lib/gameTypes';
+import { useState, useEffect, useCallback } from 'react';
+import { GameState, Player, PlayerData } from '@/lib/gameTypes';
 import { Button } from '@/components/ui/button';
-import { Heart, Shield, Zap, Flag, LogOut, Timer } from 'lucide-react';
+import { Heart, Flag, LogOut, Timer } from 'lucide-react';
+import { KillFeed, KillFeedEvent } from './KillFeed';
+import { TeamChat, ChatMessage } from './TeamChat';
 
 interface GameHUDProps {
   gameState: GameState | null;
   currentPlayer: Player | null;
+  playerData: PlayerData | null;
+  killFeedEvents: KillFeedEvent[];
+  chatMessages: ChatMessage[];
   onExitBattle: () => void;
+  onSendChatMessage: (message: string) => void;
 }
 
-export const GameHUD = ({ gameState, currentPlayer, onExitBattle }: GameHUDProps) => {
+export const GameHUD = ({ 
+  gameState, 
+  currentPlayer, 
+  playerData,
+  killFeedEvents,
+  chatMessages,
+  onExitBattle,
+  onSendChatMessage,
+}: GameHUDProps) => {
+  const [isChatOpen, setIsChatOpen] = useState(false);
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 't' || e.key === 'T') {
+      if (!isChatOpen) {
+        e.preventDefault();
+        setIsChatOpen(true);
+      }
+    }
+  }, [isChatOpen]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
   if (!gameState || !currentPlayer) return null;
 
   const healthPercent = (currentPlayer.health / currentPlayer.maxHealth) * 100;
@@ -41,6 +72,9 @@ export const GameHUD = ({ gameState, currentPlayer, onExitBattle }: GameHUDProps
           </div>
         </div>
       </div>
+
+      {/* Kill Feed */}
+      <KillFeed events={killFeedEvents} />
 
       {/* Bottom Left - Player Stats */}
       <div className="absolute bottom-4 left-4 bg-card/80 backdrop-blur-sm border border-border rounded-lg p-4 min-w-[200px]">
@@ -97,6 +131,7 @@ export const GameHUD = ({ gameState, currentPlayer, onExitBattle }: GameHUDProps
           <p><kbd className="px-2 py-1 bg-secondary rounded text-foreground">Mouse</kbd> Aim</p>
           <p><kbd className="px-2 py-1 bg-secondary rounded text-foreground">LMB</kbd> Shoot</p>
           <p><kbd className="px-2 py-1 bg-secondary rounded text-foreground">E</kbd> Interact</p>
+          <p><kbd className="px-2 py-1 bg-secondary rounded text-foreground">T</kbd> Team Chat</p>
           <p><kbd className="px-2 py-1 bg-secondary rounded text-foreground">TAB</kbd> Scoreboard</p>
         </div>
       </div>
@@ -113,6 +148,15 @@ export const GameHUD = ({ gameState, currentPlayer, onExitBattle }: GameHUDProps
           Exit Battle
         </Button>
       </div>
+
+      {/* Team Chat */}
+      <TeamChat
+        messages={chatMessages}
+        currentTeam={currentPlayer.team}
+        onSendMessage={onSendChatMessage}
+        isOpen={isChatOpen}
+        onToggle={() => setIsChatOpen(!isChatOpen)}
+      />
     </>
   );
 };

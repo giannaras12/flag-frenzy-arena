@@ -174,3 +174,17 @@ export type ServerMessage =
   | { type: 'rankUp'; oldRank: Rank; newRank: Rank; newXP: number }
   | { type: 'xpGain'; amount: number; newXP: number; currentRank: Rank; nextRank: NextRankInfo | null }
   | { type: 'error'; message: string };
+
+// XP Gain Event for UI
+export interface XPGainEvent {
+  amount: number;
+  newXP: number;
+  currentRank: Rank;
+  nextRank: NextRankInfo | null;
+}
+
+// Rank Up Event for UI
+export interface RankUpEvent {
+  oldRank: Rank;
+  newRank: Rank;
+}

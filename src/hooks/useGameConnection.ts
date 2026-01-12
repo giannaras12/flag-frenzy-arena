@@ -7,8 +7,8 @@ import {
   PlayerData,
   Hull,
   Gun,
-  Rank,
-  NextRankInfo,
+  XPGainEvent,
+  RankUpEvent,
 } from '@/lib/gameTypes';
 
 interface UseGameConnectionReturn {
@@ -22,8 +22,8 @@ interface UseGameConnectionReturn {
   garageGuns: Gun[];
   playerId: string | null;
   sessionToken: string | null;
-  lastRankUp: { oldRank: Rank; newRank: Rank } | null;
-  lastXPGain: { amount: number; newXP: number } | null;
+  lastRankUp: RankUpEvent | null;
+  lastXPGain: XPGainEvent | null;
   connect: () => void;
   disconnect: () => void;
   register: (username: string, password: string) => void;
@@ -48,8 +48,8 @@ export const useGameConnection = (): UseGameConnectionReturn => {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [lastEvent, setLastEvent] = useState<ServerMessage | null>(null);
-  const [lastRankUp, setLastRankUp] = useState<{ oldRank: Rank; newRank: Rank } | null>(null);
-  const [lastXPGain, setLastXPGain] = useState<{ amount: number; newXP: number } | null>(null);
+  const [lastRankUp, setLastRankUp] = useState<RankUpEvent | null>(null);
+  const [lastXPGain, setLastXPGain] = useState<XPGainEvent | null>(null);
   
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -98,7 +98,12 @@ export const useGameConnection = (): UseGameConnectionReturn => {
           break;
 
         case 'xpGain':
-          setLastXPGain({ amount: message.amount, newXP: message.newXP });
+          setLastXPGain({ 
+            amount: message.amount, 
+            newXP: message.newXP,
+            currentRank: message.currentRank,
+            nextRank: message.nextRank,
+          });
           setPlayerData(prev => prev ? { 
             ...prev, 
             xp: message.newXP, 

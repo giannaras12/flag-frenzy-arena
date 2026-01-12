@@ -338,7 +338,7 @@ const Index = () => {
         />
       )}
       
-      {currentScreen === 'game' && (
+      {currentScreen === 'game' && gameState && currentPlayerId && (
         <Game
           gameState={gameState}
           playerId={currentPlayerId}

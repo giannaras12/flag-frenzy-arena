@@ -3,29 +3,41 @@ import { GameCanvas } from './GameCanvas';
 import { GameHUD } from './GameHUD';
 import { Scoreboard } from './Scoreboard';
 import { SoundControls } from './SoundControls';
-import { GameState, Vector2 } from '@/lib/gameTypes';
+import { RankUpOverlay } from './RankUpOverlay';
+import { XPGainIndicator } from './XPGainIndicator';
+import { GameState, Vector2, PlayerData, XPGainEvent, RankUpEvent } from '@/lib/gameTypes';
 import { useSound } from '@/contexts/SoundContext';
 
 interface GameProps {
   gameState: GameState | null;
   playerId: string | null;
+  playerData: PlayerData | null;
   onMove: (direction: Vector2) => void;
   onRotate: (angle: number) => void;
   onRotateTurret: (angle: number) => void;
   onShoot: () => void;
   onInteract: () => void;
   onExitBattle: () => void;
+  lastRankUp: RankUpEvent | null;
+  lastXPGain: XPGainEvent | null;
+  onClearRankUp: () => void;
+  onClearXPGain: () => void;
 }
 
 export const Game = ({
   gameState,
   playerId,
+  playerData,
   onMove,
   onRotate,
   onRotateTurret,
   onShoot,
   onInteract,
   onExitBattle,
+  lastRankUp,
+  lastXPGain,
+  onClearRankUp,
+  onClearXPGain,
 }: GameProps) => {
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
@@ -54,10 +66,8 @@ export const Game = ({
   // Handle flag interaction with sound
   const handleInteract = useCallback(() => {
     if (currentPlayer?.hasFlag) {
-      // About to capture
       playFlagCapture();
     } else {
-      // About to pickup
       playFlagPickup();
     }
     onInteract();
@@ -77,7 +87,6 @@ export const Game = ({
     let timeout: NodeJS.Timeout;
     
     if (isMoving) {
-      // Stop after 100ms of no movement calls
       timeout = setTimeout(() => {
         setIsMoving(false);
         stopTankMove();
@@ -96,13 +105,11 @@ export const Game = ({
 
     const prev = prevGameStateRef.current;
 
-    // Check for projectile explosions (projectiles that disappeared)
-    const prevProjectileIds = new Set(prev.projectiles.map(p => p.id));
+    // Check for projectile explosions
     const currentProjectileIds = new Set(gameState.projectiles.map(p => p.id));
     
     prev.projectiles.forEach(proj => {
       if (!currentProjectileIds.has(proj.id)) {
-        // Projectile disappeared - check if it was explosive
         if (proj.effect === 'explosive') {
           playExplosion('large');
         } else if (proj.effect === 'plasma') {
@@ -113,10 +120,9 @@ export const Game = ({
 
     // Check for player deaths
     prev.players.forEach(prevPlayer => {
-      const currentPlayer = gameState.players.find(p => p.id === prevPlayer.id);
-      if (currentPlayer) {
-        if (prevPlayer.isAlive && !currentPlayer.isAlive) {
-          // Player died
+      const currPlayer = gameState.players.find(p => p.id === prevPlayer.id);
+      if (currPlayer) {
+        if (prevPlayer.isAlive && !currPlayer.isAlive) {
           if (prevPlayer.id === playerId) {
             playDeath();
           } else {
@@ -124,8 +130,7 @@ export const Game = ({
           }
         }
         
-        // Check for damage taken
-        if (currentPlayer.health < prevPlayer.health && prevPlayer.id === playerId) {
+        if (currPlayer.health < prevPlayer.health && prevPlayer.id === playerId) {
           playHit();
         }
       }
@@ -203,6 +208,20 @@ export const Game = ({
       {/* Scoreboard Modal */}
       {showScoreboard && (
         <Scoreboard gameState={gameState} playerId={playerId} />
+      )}
+
+      {/* Rank Up Overlay */}
+      {lastRankUp && (
+        <RankUpOverlay 
+          oldRank={lastRankUp.oldRank} 
+          newRank={lastRankUp.newRank} 
+          onComplete={onClearRankUp} 
+        />
+      )}
+
+      {/* XP Gain Indicator */}
+      {lastXPGain && (
+        <XPGainIndicator amount={lastXPGain.amount} onComplete={onClearXPGain} />
       )}
     </div>
   );

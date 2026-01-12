@@ -97,7 +97,7 @@ class Database {
     
     // Generate session
     const sessionToken = generateSessionToken();
-    this.sessions.set(sessionToken, odId visId);
+    this.sessions.set(sessionToken, odId);
 
     console.log(`[AUTH] New account registered: ${username}`);
     

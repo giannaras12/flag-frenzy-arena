@@ -12,6 +12,7 @@ const os = require('os');
 const { v4: uuidv4 } = require('uuid');
 const { validateUsername, validatePassword } = require('./auth');
 const { getRankForXP, getNextRank, XP_REWARDS } = require('./ranks');
+const { addAIBots, removeAllAIBots, updateAIBot, getAIBots } = require('./ai');
 
 // ==================== CONFIGURATION ====================
 const CONFIG = {
@@ -175,6 +176,79 @@ function handleMessage(ws, message) {
     case 'leaveBattle':
       handleLeaveBattle(ws);
       break;
+    case 'globalChat':
+      handleGlobalChat(ws, message.message);
+      break;
+    case 'teamChat':
+      handleTeamChat(ws, message.message);
+      break;
+  }
+}
+
+// Chat command handler
+function handleGlobalChat(ws, message) {
+  const result = getPlayerFromWs(ws);
+  if (!result) return;
+  
+  const { player } = result;
+  
+  // Check for commands
+  if (message.startsWith('/')) {
+    const cmd = message.toLowerCase().trim();
+    
+    if (cmd === '/add10aired') {
+      const bots = addAIBots(10, 'red', gameState, HULLS, GUNS);
+      console.log(`[AI] Added 10 AI bots to red team`);
+      broadcast({ type: 'systemMessage', message: `${player.username} added 10 AI bots to RED team` });
+      return;
+    }
+    
+    if (cmd === '/add10aiblue') {
+      const bots = addAIBots(10, 'blue', gameState, HULLS, GUNS);
+      console.log(`[AI] Added 10 AI bots to blue team`);
+      broadcast({ type: 'systemMessage', message: `${player.username} added 10 AI bots to BLUE team` });
+      return;
+    }
+    
+    if (cmd === '/removeai') {
+      const removed = removeAllAIBots(gameState);
+      console.log(`[AI] Removed ${removed.length} AI bots`);
+      broadcast({ type: 'systemMessage', message: `${player.username} removed all AI bots (${removed.length})` });
+      return;
+    }
+    
+    // Unknown command
+    ws.send(JSON.stringify({ type: 'systemMessage', message: `Unknown command: ${cmd}` }));
+    return;
+  }
+  
+  // Regular global chat
+  broadcast({
+    type: 'globalChat',
+    playerId: result.id,
+    playerName: player.username,
+    team: player.team,
+    message: message,
+  });
+}
+
+function handleTeamChat(ws, message) {
+  const result = getPlayerFromWs(ws);
+  if (!result) return;
+  
+  const { player } = result;
+  
+  // Send to team only
+  for (const [id, p] of gameState.players) {
+    if (p.team === player.team && p.ws && p.ws.readyState === WebSocket.OPEN) {
+      p.ws.send(JSON.stringify({
+        type: 'teamChat',
+        playerId: result.id,
+        playerName: player.username,
+        team: player.team,
+        message: message,
+      }));
+    }
   }
 }
 

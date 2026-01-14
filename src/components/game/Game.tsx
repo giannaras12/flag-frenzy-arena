@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { GameCanvas } from './GameCanvas';
+import { Game3DCanvas } from '../game3d/Game3DCanvas';
 import { GameHUD } from './GameHUD';
 import { Scoreboard } from './Scoreboard';
 import { SoundControls } from './SoundControls';
@@ -188,9 +188,9 @@ export const Game = ({
       {/* Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-destructive/5" />
       
-      {/* Game Canvas Container */}
-      <div className="relative">
-        <GameCanvas
+      {/* 3D Game Canvas Container */}
+      <div className="relative w-full h-screen">
+        <Game3DCanvas
           gameState={gameState}
           playerId={playerId}
           onMove={handleMove}
